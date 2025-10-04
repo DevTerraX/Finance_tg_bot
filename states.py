@@ -17,11 +17,13 @@ class AddIncome(StatesGroup):
 class Settings(StatesGroup):
     wallet_add = State()
     wallet_delete = State()
+    wallet_confirm_delete = State()
     category_add = State()
     category_delete = State()
-    goal_set = State()
+    category_confirm_delete = State()
     reminder_set = State()
     pin_set = State()
+    goal_set = State()
 
 class PinCheck(StatesGroup):
     pin = State()

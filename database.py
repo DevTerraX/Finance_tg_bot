@@ -1,160 +1,166 @@
-import sqlite3
-import datetime
+from tortoise import Tortoise, fields
+from tortoise.models import Model
+from tortoise.exceptions import DoesNotExist
+from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise.functions import Sum
+from config import DB_PATH
+from bot import bot
+from datetime import datetime, timedelta
+import logging
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-conn = sqlite3.connect('finance_bot.db')
-cursor = conn.cursor()
+scheduler = AsyncIOScheduler()
 
-def init_db():
-    # Создание таблиц
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT,
-        amount REAL,
-        category TEXT,
-        wallet TEXT,
-        note TEXT,
-        date DATETIME
-    )
-    ''')
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS wallets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE
-    )
-    ''')
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS categories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        emoji TEXT,
-        kind TEXT
-    )
-    ''')
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS goals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        description TEXT,
-        target_amount REAL,
-        current_amount REAL,
-        limit_category TEXT,
-        limit_amount REAL
-    )
-    ''')
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS settings (
-        id INTEGER PRIMARY KEY,
-        default_currency TEXT,
-        reminder_time TEXT,
-        pin TEXT,
-        chat_id INTEGER
-    )
-    ''')
-    
-    # Добавление столбца chat_id если отсутствует
-    cursor.execute("PRAGMA table_info(settings)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'chat_id' not in columns:
-        cursor.execute("ALTER TABLE settings ADD COLUMN chat_id INTEGER")
-    
-    # Дефолтные данные
-    cursor.execute("SELECT COUNT(*) FROM settings")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO settings (id, default_currency, reminder_time, pin, chat_id) VALUES (1, '₽', '22:00', NULL, NULL)")
-    
-    cursor.execute("INSERT OR IGNORE INTO wallets (name) VALUES ('Наличные'), ('Карта')")
-    cursor.execute("INSERT OR IGNORE INTO categories (name, emoji, kind) VALUES ('Еда', '🍔', 'expense'), ('Заправка', '⛽', 'expense'), ('Магазин', '🛒', 'expense'), ('Развлечения', '🎮', 'expense')")
-    cursor.execute("INSERT OR IGNORE INTO categories (name, emoji, kind) VALUES ('Зарплата', '💼', 'income'), ('Подарок', '🎁', 'income'), ('Лотерея', '🎲', 'income')")
-    
-    conn.commit()
+class Settings(Model):
+    id = fields.IntField(pk=True)
+    reminder_time = fields.CharField(max_length=5, null=True)
+    chat_id = fields.BigIntField(null=True)
+    pin = fields.CharField(max_length=4, null=True)
 
-def add_transaction(type_, amount, category, wallet, note=None):
-    cursor.execute("INSERT INTO transactions (type, amount, category, wallet, note, date) VALUES (?, ?, ?, ?, ?, ?)",
-                   (type_, amount, category, wallet, note, datetime.datetime.now()))
-    conn.commit()
+class Transaction(Model):
+    id = fields.IntField(pk=True)
+    type = fields.CharField(max_length=10)  # income or expense
+    amount = fields.FloatField()
+    category = fields.CharField(max_length=50)
+    wallet = fields.CharField(max_length=50)
+    note = fields.TextField(null=True)
+    date = fields.DatetimeField(auto_now_add=True)
 
-def get_balance():
-    cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END) - SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions")
-    return cursor.fetchone()[0] or 0
+class Category(Model):
+    name = fields.CharField(max_length=50, pk=True)
+    emoji = fields.CharField(max_length=10, default='🆕')
+    kind = fields.CharField(max_length=10)  # expense, income, both
 
-def get_summary(period):
-    today = datetime.date.today()
+class Wallet(Model):
+    name = fields.CharField(max_length=50, pk=True)
+
+class Goal(Model):
+    id = fields.IntField(pk=True)
+    description = fields.CharField(max_length=100)
+    target = fields.FloatField()
+    current = fields.FloatField(default=0.0)
+
+async def init_db():
+    await Tortoise.init(db_url=DB_PATH, modules={'models': ['database']})
+    await Tortoise.generate_schemas()
+    logging.info("Database initialized")
+
+async def add_transaction(type_, amount, category, wallet):
+    await Transaction.create(type=type_, amount=amount, category=category, wallet=wallet)
+    logging.info(f"Added transaction: type={type_}, amount={amount}, category={category}, wallet={wallet}")
+
+async def get_balance():
+    incomes = await Transaction.filter(type='income').all().values_list('amount', flat=True)
+    expenses = await Transaction.filter(type='expense').all().values_list('amount', flat=True)
+    return sum(incomes or [0]) - sum(expenses or [0])
+
+async def get_summary(period):
+    now = datetime.now()
     if period == 'day':
-        start = end = today
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == 'week':
-        start = today - datetime.timedelta(days=today.weekday())
-        end = start + datetime.timedelta(days=6)
+        start = now - timedelta(days=now.weekday())
+    elif period == 'month':
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     else:
-        start = today.replace(day=1)
-        end = (start + datetime.timedelta(days=31)).replace(day=1) - datetime.timedelta(days=1)
+        start = datetime.min
+
+    expenses = await Transaction.filter(type='expense', date__gte=start).group_by('category').annotate(total=Sum('amount')).values('category', 'total')
+    incomes = await Transaction.filter(type='income', date__gte=start).group_by('category').annotate(total=Sum('amount')).values('category', 'total')
     
-    cursor.execute("SELECT category, SUM(amount) FROM transactions WHERE type='expense' AND date BETWEEN ? AND ? GROUP BY category", (start, end + datetime.timedelta(days=1)))
-    expenses = cursor.fetchall()
-    cursor.execute("SELECT category, SUM(amount) FROM transactions WHERE type='income' AND date BETWEEN ? AND ? GROUP BY category", (start, end + datetime.timedelta(days=1)))
-    incomes = cursor.fetchall()
-    return expenses, incomes
+    expenses_list = [(item['category'], item['total']) for item in expenses]
+    incomes_list = [(item['category'], item['total']) for item in incomes]
+    
+    return expenses_list, incomes_list
 
-def get_category_summary(category):
-    cursor.execute("SELECT type, SUM(amount) FROM transactions WHERE category = ? GROUP BY type", (category,))
-    return cursor.fetchall()
+async def get_category_summary(category):
+    data = await Transaction.filter(category=category).group_by('type').annotate(total=Sum('amount')).values('type', 'total')
+    return [(item['type'], item['total']) for item in data]
 
-def get_wallet_summary(wallet):
-    cursor.execute("SELECT type, SUM(amount) FROM transactions WHERE wallet = ? GROUP BY type", (wallet,))
-    return cursor.fetchall()
+async def get_wallet_summary(wallet):
+    data = await Transaction.filter(wallet=wallet).group_by('type').annotate(total=Sum('amount')).values('type', 'total')
+    return [(item['type'], item['total']) for item in data]
 
-def add_wallet(name):
-    try:
-        cursor.execute("INSERT INTO wallets (name) VALUES (?)", (name,))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False  # Уже существует
-
-def delete_wallet(name):
-    cursor.execute("DELETE FROM wallets WHERE name = ?", (name,))
-    conn.commit()
-
-def get_wallets():
-    cursor.execute("SELECT name FROM wallets")
-    return [row[0] for row in cursor.fetchall()]
-
-def add_category(name, emoji, kind):
-    try:
-        cursor.execute("INSERT INTO categories (name, emoji, kind) VALUES (?, ?, ?)", (name, emoji, kind))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
+async def add_wallet(name):
+    if await Wallet.filter(name=name).exists():
         return False
+    if await Wallet.all().count() >= 50:
+        return False
+    await Wallet.create(name=name)
+    logging.info(f"Added wallet: {name}")
+    return True
 
-def delete_category(name):
-    cursor.execute("DELETE FROM categories WHERE name = ?", (name,))
-    conn.commit()
+async def delete_wallet(name):
+    wallet = await Wallet.get_or_none(name=name)
+    if wallet:
+        await wallet.delete()
+        logging.info(f"Deleted wallet: {name}")
 
-def get_categories(kind):
-    cursor.execute("SELECT emoji, name FROM categories WHERE kind IN (?, 'both')", (kind,))
-    return cursor.fetchall()
+async def add_category(name, emoji, kind):
+    if kind not in ['expense', 'income', 'both']:
+        raise ValueError("Invalid kind")
+    if await Category.filter(name=name).exists():
+        return False
+    if await Category.all().count() >= 50:
+        return False
+    await Category.create(name=name, emoji=emoji, kind=kind)
+    logging.info(f"Added category: {name}, kind={kind}")
+    return True
 
-def set_reminder_time(time_):
-    cursor.execute("UPDATE settings SET reminder_time = ? WHERE id=1", (time_,))
-    conn.commit()
+async def delete_category(name):
+    category = await Category.get_or_none(name=name)
+    if category:
+        await category.delete()
+        logging.info(f"Deleted category: {name}")
 
-def set_pin(pin):
-    cursor.execute("UPDATE settings SET pin = ? WHERE id=1", (pin,))
-    conn.commit()
+async def set_reminder_time(time_, chat_id):
+    settings = await Settings.get_or_none(id=1)
+    if settings:
+        settings.reminder_time = time_
+        settings.chat_id = chat_id
+        await settings.save()
+    else:
+        await Settings.create(id=1, reminder_time=time_, chat_id=chat_id)
+    logging.info(f"Set reminder time: {time_}, chat_id={chat_id}")
 
-def get_pin():
-    cursor.execute("SELECT pin FROM settings WHERE id=1")
-    result = cursor.fetchone()
-    return result[0] if result else None
+async def set_pin(pin):
+    settings = await Settings.get_or_none(id=1)
+    if settings:
+        settings.pin = pin
+        await settings.save()
+    else:
+        await Settings.create(id=1, pin=pin)
+    logging.info(f"Set pin: {'****' if pin else 'None'}")
 
-def add_goal(description, target_amount, limit_category=None, limit_amount=None):
-    cursor.execute("INSERT INTO goals (description, target_amount, current_amount, limit_category, limit_amount) VALUES (?, ?, 0, ?, ?)", (description, target_amount, limit_category, limit_amount))
-    conn.commit()
+async def get_pin():
+    settings = await Settings.get_or_none(id=1)
+    return settings.pin if settings else None
 
-def get_goals():
-    cursor.execute("SELECT * FROM goals")
-    return cursor.fetchall()
+async def add_goal(description, target):
+    await Goal.create(description=description, target=target)
+    logging.info(f"Added goal: {description}, target={target}")
+
+async def get_goals():
+    return await Goal.all().values_list('id', 'description', 'target', 'current')
+
+def setup_reminders():
+    settings = Settings.get_or_none(id=1).run_sync()
+    if settings and settings.reminder_time and settings.chat_id:
+        try:
+            hour, minute = map(int, settings.reminder_time.split(':'))
+            if 0 <= hour < 24 and 0 <= minute < 60:
+                from utils import send_reminder  # Перенесено в utils.py
+                scheduler.add_job(
+                    send_reminder,
+                    'cron',
+                    hour=hour,
+                    minute=minute,
+                    args=(bot, settings.chat_id),
+                    id=f"reminder_{settings.chat_id}"
+                )
+                scheduler.start()
+                logging.info(f"Scheduled reminder for {settings.reminder_time} to chat_id {settings.chat_id}")
+            else:
+                logging.error("Invalid reminder time format")
+        except ValueError:
+            logging.error("Invalid reminder time format")
