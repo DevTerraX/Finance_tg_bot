@@ -1,26 +1,34 @@
-import asyncio
 import logging
-from bot import dp, bot
-from database import init_db, setup_reminders
-from middlewares import ErrorMiddleware
-from handlers.common import register_common_handlers
-from handlers.expense import register_expense_handlers
-from handlers.income import register_income_handlers
-from handlers.settings import register_settings_handlers
-from handlers.quick import register_quick_handlers
+from aiogram import Bot, Dispatcher, executor
+from tortoise import Tortoise
+from config import BOT_TOKEN, DB_URL
+from data.utils.db_utils import get_or_create_user
+from data.handlers import start, menu, expense, income, balance, summary, settings
 
-logging.basicConfig(level=logging.INFO, filename='bot.log', format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 
-async def main():
-    await init_db()
-    dp.middleware.setup(ErrorMiddleware())
-    register_common_handlers(dp)
-    register_expense_handlers(dp)
-    register_income_handlers(dp)
-    register_settings_handlers(dp)
-    register_quick_handlers(dp)
-    setup_reminders()
-    await dp.start_polling(bot)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+async def on_startup(dp):
+    await Tortoise.init(
+        db_url=DB_URL,
+        modules={'models': ['data.models.user', 'data.models.transaction', 'data.models.category']}
+    )
+    await Tortoise.generate_schemas()  
+    logging.info("База данных инициализирована")
+
+    start.register_handlers(dp)
+    menu.register_handlers(dp)
+    expense.register_handlers(dp)
+    income.register_handlers(dp)
+    balance.register_handlers(dp)
+    summary.register_handlers(dp)
+    settings.register_handlers(dp)
+
+async def on_shutdown(dp):
+    await Tortoise.close_connections()
+    logging.info("Соединение с БД закрыто")
+
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
