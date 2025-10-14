@@ -1,15 +1,14 @@
 # handlers/summary.py
-from aiogram import types
-from aiogram import Dispatcher 
+from aiogram import types, Dispatcher
 from aiogram.dispatcher import FSMContext
 from ..utils.db_utils import get_summary, get_or_create_user
-from utils.charts import generate_pie_chart
-from utils.csv_export import export_to_csv
-from keyboards.summary import get_summary_keyboard
-from keyboards.main_menu import get_main_menu
+from ..utils.charts import generate_pie_chart
+from ..utils.csv_export import export_to_csv
+from ..keyboards.summary import get_summary_keyboard
+from ..keyboards.main_menu import get_main_menu
 
-async def show_summary_menu(query: types.CallbackQuery):
-    await query.message.edit_text("Итоги:", reply_markup=get_summary_keyboard())
+async def show_summary_menu(message: types.Message):
+    await message.answer("Итоги:", reply_markup=get_summary_keyboard())
 
 async def summary_callback(query: types.CallbackQuery, state: FSMContext):
     data = query.data

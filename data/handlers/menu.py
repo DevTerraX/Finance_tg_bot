@@ -1,36 +1,30 @@
-# handlers/menu.py
-from aiogram import types
-from aiogram.dispatcher import FSMContext
 from aiogram import Dispatcher, types
-from ..keyboards.main_menu import get_main_menu
+from aiogram.dispatcher import FSMContext
+from ..keyboards.main_menu import get_main_menu, get_back_keyboard
 from ..states.expense_states import ExpenseStates
 from ..states.income_states import IncomeStates
 from ..states.settings_states import SettingsStates
-# Импорт других handlers для переходов (будем добавлять)
 
-async def menu_callback(query: types.CallbackQuery, state: FSMContext):
-    data = query.data
-    if data == 'balance':
-        from .balance import show_balance  # Импорт внутри, чтобы избежать циклов
-        await show_balance(query)
-    elif data == 'add_expense':
+async def menu_handler(message: types.Message, state: FSMContext):
+    text = message.text
+    if text == "Баланс":
+        from .balance import show_balance
+        await show_balance(message)  # Изменить на message вместо query
+    elif text == "Добавить расход":
         await ExpenseStates.sum.set()
-        await query.message.edit_text("Введите сумму расхода:")
-    elif data == 'add_income':
+        await message.answer("Введите сумму расхода:", reply_markup=get_back_keyboard())
+    elif text == "Добавить доход":
         await IncomeStates.sum.set()
-        await query.message.edit_text("Введите сумму дохода:")
-    elif data == 'summary':
+        await message.answer("Введите сумму дохода:", reply_markup=get_back_keyboard())
+    elif text == "Итоги":
         from .summary import show_summary_menu
-        await show_summary_menu(query)
-    elif data == 'settings':
+        await show_summary_menu(message)  # Адаптировать под message
+    elif text == "Настройки":
         await SettingsStates.categories_menu.set()
-        await query.message.edit_text("Настройки: Выберите раздел.")
-        # Добавить клавиатуру для настроек
-
-    # Общая кнопка назад в меню
-    if data == 'back_to_menu':
-        await query.message.edit_text("Главное меню", reply_markup=get_main_menu())
+        await message.answer("Настройки: Выберите раздел.", reply_markup=get_back_keyboard())
+    elif text == "Назад":
         await state.finish()
+        await message.answer("Возвращаемся в главное меню.", reply_markup=get_main_menu())
 
 def register_handlers(dp: Dispatcher):
-    dp.register_callback_query_handler(menu_callback, lambda q: q.data in ['balance', 'add_expense', 'add_income', 'summary', 'settings', 'back_to_menu'])
+    dp.register_message_handler(menu_handler, lambda m: m.text in ["Баланс", "Добавить расход", "Добавить доход", "Итоги", "Настройки", "Назад"])

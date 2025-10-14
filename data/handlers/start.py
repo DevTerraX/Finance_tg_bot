@@ -27,7 +27,8 @@ async def agree_callback(query: types.CallbackQuery, state: FSMContext):
     user = await get_or_create_user(query.from_user.id)
     user.agreement_accepted = True
     await user.save()
-    await query.message.edit_text("Спасибо! Теперь доступен весь функционал.", reply_markup=get_main_menu())
+    await query.message.edit_text("Спасибо! Теперь доступен весь функционал.")
+    await query.bot.send_message(query.from_user.id, "Главное меню:", reply_markup=get_main_menu())
 
 async def disagree_callback(query: types.CallbackQuery, state: FSMContext):
     await query.message.edit_text("Жаль. Бот недоступен без согласия.")

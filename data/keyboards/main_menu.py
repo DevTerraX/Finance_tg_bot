@@ -1,13 +1,26 @@
-# keyboards/main_menu.py
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 def get_main_menu():
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     keyboard.add(
-        InlineKeyboardButton("Баланс", callback_data="balance"),
-        InlineKeyboardButton("Добавить расход", callback_data="add_expense"),
-        InlineKeyboardButton("Добавить доход", callback_data="add_income"),
-        InlineKeyboardButton("Итоги", callback_data="summary"),
-        InlineKeyboardButton("Настройки", callback_data="settings")
+        KeyboardButton("Баланс"),
+        KeyboardButton("Добавить расход"),
+        KeyboardButton("Добавить доход"),
+        KeyboardButton("Итоги"),
+        KeyboardButton("Настройки")
+    )
+    return keyboard
+
+def get_back_keyboard():
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton("Назад"))
+    return keyboard
+
+def get_settings_keyboard():
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    keyboard.add(
+        KeyboardButton("Категории расходов"),
+        KeyboardButton("Категории доходов"),
+        KeyboardButton("Назад")
     )
     return keyboard

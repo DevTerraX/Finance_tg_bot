@@ -3,11 +3,11 @@ from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 from ..utils.db_utils import get_or_create_user, get_categories, create_category, create_transaction
 from ..models import Category
-from utils.validation import validate_amount
-from utils.cleanup import clean_chat
-from keyboards.category import get_categories_keyboard
-from keyboards.confirmation import get_confirmation_keyboard, get_edit_keyboard
-from states.income_states import IncomeStates
+from ..utils.validation import validate_amount
+from ..utils.cleanup import clean_chat
+from ..keyboards.category import get_categories_keyboard
+from ..keyboards.confirmation import get_confirmation_keyboard, get_edit_keyboard
+from ..states.income_states import IncomeStates
 
 async def income_sum(message: types.Message, state: FSMContext):
     user = await get_or_create_user(message.from_user.id)

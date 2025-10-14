@@ -2,8 +2,8 @@
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 from ..utils.db_utils import get_categories, create_category, delete_category, get_or_create_user
-from keyboards.category import get_categories_keyboard
-from states.settings_states import SettingsStates
+from ..keyboards.category import get_categories_keyboard
+from ..states.settings_states import SettingsStates
 
 async def settings_menu(message: types.Message, state: FSMContext):
     # Пока только категории

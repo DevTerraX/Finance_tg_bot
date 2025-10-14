@@ -12,6 +12,7 @@ async def expense_sum(message: types.Message, state: FSMContext):
     user = await get_or_create_user(message.from_user.id)
     try:
         amount = validate_amount(message.text)
+        reply_markup=get_main_menu()
         await state.update_data(amount=amount)
         await ExpenseStates.category.set()
         categories = await get_categories(user, 'expense')
