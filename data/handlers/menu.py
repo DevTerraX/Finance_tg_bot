@@ -4,6 +4,7 @@ from ..keyboards.main_menu import get_main_menu, get_back_keyboard
 from ..states.expense_states import ExpenseStates
 from ..states.income_states import IncomeStates
 from ..states.settings_states import SettingsStates
+from ..keyboards.settings import get_settings_keyboard
 
 async def menu_handler(message: types.Message, state: FSMContext):
     text = message.text

@@ -1,15 +1,21 @@
-# handlers/income.py
+# data/handlers/income.py
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 from ..utils.db_utils import get_or_create_user, get_categories, create_category, create_transaction
-from ..models import Category
 from ..utils.validation import validate_amount
 from ..utils.cleanup import clean_chat
 from ..keyboards.category import get_categories_keyboard
 from ..keyboards.confirmation import get_confirmation_keyboard, get_edit_keyboard
+from ..keyboards.main_menu import get_main_menu, get_back_keyboard
 from ..states.income_states import IncomeStates
+from ..models.category import Category
 
 async def income_sum(message: types.Message, state: FSMContext):
+    if message.text == "Назад":
+        await state.finish()
+        await message.answer("Возвращаемся в главное меню.", reply_markup=get_main_menu())
+        return
+
     user = await get_or_create_user(message.from_user.id)
     try:
         amount = validate_amount(message.text)
@@ -19,7 +25,7 @@ async def income_sum(message: types.Message, state: FSMContext):
         keyboard = get_categories_keyboard(categories, type='income')
         await message.answer("Выберите категорию:", reply_markup=keyboard)
     except ValueError as e:
-        await message.answer(str(e) + " Попробуйте снова.")
+        await message.answer(str(e) + " Попробуйте снова.", reply_markup=get_back_keyboard())
 
 async def income_category_callback(query: types.CallbackQuery, state: FSMContext):
     data = query.data
@@ -29,17 +35,21 @@ async def income_category_callback(query: types.CallbackQuery, state: FSMContext
         await IncomeStates.confirm.set()
         state_data = await state.get_data()
         amount = state_data['amount']
-        category = await Category.get(id=cat_id)  # Правильный поиск по ID
+        category = await Category.get(id=cat_id)
         await query.message.edit_text(f"Подтвердите: {amount} в категории {category.name}", reply_markup=get_confirmation_keyboard(is_expense=False))
     elif data == 'create_category':
-        await IncomeStates.category.set()  # Остаёмся в состоянии для ввода текста
-        await query.message.edit_text("Введите название новой категории:")
+        await IncomeStates.category.set()
+        await query.message.edit_text("Введите название новой категории:", reply_markup=get_back_keyboard())
     elif data == 'back':
         await state.finish()
-        from .menu import get_main_menu
         await query.message.edit_text("Главное меню", reply_markup=get_main_menu())
 
 async def income_create_category(message: types.Message, state: FSMContext):
+    if message.text == "Назад":
+        await state.finish()
+        await message.answer("Возвращаемся в главное меню.", reply_markup=get_main_menu())
+        return
+
     user = await get_or_create_user(message.from_user.id)
     name = message.text.strip()
     category = await create_category(user, name, 'income')
@@ -70,7 +80,7 @@ async def income_edit_callback(query: types.CallbackQuery, state: FSMContext):
     data = query.data
     if data == 'edit_sum':
         await IncomeStates.sum.set()
-        await query.message.edit_text("Введите новую сумму:")
+        await query.message.edit_text("Введите новую сумму:", reply_markup=get_back_keyboard())
     elif data == 'edit_category':
         await IncomeStates.category.set()
         user = await get_or_create_user(query.from_user.id)
@@ -85,6 +95,6 @@ async def income_edit_callback(query: types.CallbackQuery, state: FSMContext):
 def register_handlers(dp: Dispatcher):
     dp.register_message_handler(income_sum, state=IncomeStates.sum)
     dp.register_callback_query_handler(income_category_callback, state=IncomeStates.category)
-    dp.register_message_handler(income_create_category, state=IncomeStates.category)  # Для текста новой категории
+    dp.register_message_handler(income_create_category, state=IncomeStates.category, content_types=['text'])
     dp.register_callback_query_handler(income_confirm_callback, state=IncomeStates.confirm)
     dp.register_callback_query_handler(income_edit_callback, state=IncomeStates.edit)
