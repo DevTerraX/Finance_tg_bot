@@ -1,26 +1,22 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-def get_main_menu():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    keyboard.add(
-        KeyboardButton("Баланс"),
-        KeyboardButton("Добавить расход"),
-        KeyboardButton("Добавить доход"),
-        KeyboardButton("Итоги"),
-        KeyboardButton("Настройки")
-    )
-    return keyboard
+BALANCE_BUTTON = "💰 Баланс"
+EXPENSE_BUTTON = "🧾 Добавить расход"
+INCOME_BUTTON = "💵 Добавить доход"
+SUMMARY_BUTTON = "📊 Итоги"
+SETTINGS_BUTTON = "⚙️ Настройки"
+BACK_BUTTON = "🔙 Назад"
 
-def get_back_keyboard():
+
+def get_main_menu() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(KeyboardButton("Назад"))
+    keyboard.row(KeyboardButton(BALANCE_BUTTON), KeyboardButton(EXPENSE_BUTTON))
+    keyboard.row(KeyboardButton(INCOME_BUTTON), KeyboardButton(SUMMARY_BUTTON))
+    keyboard.row(KeyboardButton(SETTINGS_BUTTON))
     return keyboard
 
-def get_settings_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    keyboard.add(
-        KeyboardButton("Категории расходов"),
-        KeyboardButton("Категории доходов"),
-        KeyboardButton("Назад")
-    )
+
+def get_back_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton(BACK_BUTTON))
     return keyboard

@@ -1,31 +1,21 @@
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
-from ..keyboards.main_menu import get_main_menu, get_back_keyboard
-from ..states.expense_states import ExpenseStates
-from ..states.income_states import IncomeStates
-from ..states.settings_states import SettingsStates
-from ..keyboards.settings import get_settings_keyboard
 
-async def menu_handler(message: types.Message, state: FSMContext):
-    text = message.text
-    if text == "Баланс":
-        from .balance import show_balance
-        await show_balance(message)  # Изменить на message вместо query
-    elif text == "Добавить расход":
-        await ExpenseStates.sum.set()
-        await message.answer("Введите сумму расхода:", reply_markup=get_back_keyboard())
-    elif text == "Добавить доход":
-        await IncomeStates.sum.set()
-        await message.answer("Введите сумму дохода:", reply_markup=get_back_keyboard())
-    elif text == "Итоги":
-        from .summary import show_summary_menu
-        await show_summary_menu(message)  # Адаптировать под message
-    elif text == "Настройки":
-        await SettingsStates.categories_menu.set()
-        await message.answer("Настройки: Выберите раздел.", reply_markup=get_back_keyboard())
-    elif text == "Назад":
-        await state.finish()
-        await message.answer("Возвращаемся в главное меню.", reply_markup=get_main_menu())
+from ..utils.db_utils import get_or_create_user
+from ..utils.cleanup import clean_chat
+from ..keyboards.main_menu import (
+    get_main_menu,
+    BACK_BUTTON
+)
+
+
+async def back_to_main_menu(message: types.Message, state: FSMContext):
+    user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    await state.finish()
+    reply = await message.answer("🔁 Возвращаю тебя в главное меню. Готов продолжать путешествие по финансам?", reply_markup=get_main_menu())
+    if user.clean_chat:
+        await clean_chat(message.bot, message.chat.id, reply.message_id)
+
 
 def register_handlers(dp: Dispatcher):
-    dp.register_message_handler(menu_handler, lambda m: m.text in ["Баланс", "Добавить расход", "Добавить доход", "Итоги", "Настройки", "Назад"])
+    dp.register_message_handler(back_to_main_menu, lambda m: m.text == BACK_BUTTON, state=None)

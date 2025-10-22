@@ -1,90 +1,52 @@
-# keyboards/settings.py
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from .main_menu import BACK_BUTTON
+
+
+PROFILE_BUTTON = "👤 Профиль"
+EXPENSE_CATEGORIES_BUTTON = "📂 Категории расходов"
+INCOME_CATEGORIES_BUTTON = "💰 Категории доходов"
+NOTIFICATIONS_BUTTON = "🔔 Напоминания"
+AUTO_CLEAN_PREFIX = "🧹 Автоочистка"
+CATEGORY_ADD_BUTTON = "➕ Добавить категорию"
+CATEGORY_DELETE_BUTTON = "🗑️ Удалить категорию"
+CANCEL_BUTTON = "Отмена"
 
 
 def get_settings_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура настроек"""
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton("📊 Категории расходов")],
-            [KeyboardButton("💰 Категории доходов")],
-            [KeyboardButton("🔙 Назад")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False
-    )
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row(KeyboardButton(PROFILE_BUTTON), KeyboardButton(EXPENSE_CATEGORIES_BUTTON))
+    keyboard.row(KeyboardButton(INCOME_CATEGORIES_BUTTON), KeyboardButton(NOTIFICATIONS_BUTTON))
+    keyboard.row(KeyboardButton(BACK_BUTTON))
     return keyboard
 
-def get_categories_management_keyboard(categories, category_type) -> ReplyKeyboardMarkup:
-    """Клавиатура управления категориями"""
-    keyboard = []
-    
-    # Кнопки категорий (первые 3-4 для удобства)
-    cat_buttons = []
-    for i, category in enumerate(categories[:4]):
-        cat_buttons.append(KeyboardButton(category['name']))
-        if i % 2 == 1:  # Две кнопки в ряд
-            keyboard.append(cat_buttons)
-            cat_buttons = []
-    
-    if cat_buttons:
-        keyboard.append(cat_buttons)
-    
-    # Если есть больше категорий, добавляем кнопку "Показать все"
-    if len(categories) > 4:
-        keyboard.append([KeyboardButton("📋 Показать все категории")])
-    
-    # Кнопки управления
-    keyboard.extend([
-        [KeyboardButton("➕ Добавить категорию")],
-        [KeyboardButton("🗑️ Удалить категорию")],
-        [KeyboardButton("🔙 Назад")]
-    ])
-    
-    return ReplyKeyboardMarkup(
-        keyboard=keyboard,
-        resize_keyboard=True,
-        one_time_keyboard=False
-    )
 
-def get_categories_delete_keyboard(categories, category_type) -> ReplyKeyboardMarkup:
-    """Клавиатура для удаления категорий"""
-    keyboard = []
-    
-    for i, category in enumerate(categories):
-        row = []
-        # Две категории в ряд
-        if i % 2 == 0 and i + 1 < len(categories):
-            row.append(KeyboardButton(f"🗑️ {categories[i]['name']}"))
-            row.append(KeyboardButton(f"🗑️ {categories[i+1]['name']}"))
-            i += 1
-        else:
-            row.append(KeyboardButton(f"🗑️ {category['name']}"))
-        keyboard.append(row)
-    
-    keyboard.append([KeyboardButton("❌ Отмена")])
-    
-    return ReplyKeyboardMarkup(
-        keyboard=keyboard,
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-def get_categories_keyboard():
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(
-        InlineKeyboardButton("Категория 1", callback_data="category_1"),
-        InlineKeyboardButton("Категория 2", callback_data="category_2"),
-        InlineKeyboardButton("Назад", callback_data="back")
-    )
+def get_profile_keyboard(user) -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row(KeyboardButton(f"{AUTO_CLEAN_PREFIX}: {'Вкл' if user.clean_chat else 'Выкл'}"))
+    keyboard.row(KeyboardButton("✏️ Изменить имя"), KeyboardButton(f"💱 Валюта: {user.currency}"))
+    keyboard.row(KeyboardButton(f"🌍 Часовой пояс: {user.timezone}"))
+    keyboard.row(KeyboardButton(f"📅 Формат даты: {user.date_format}"))
+    keyboard.row(KeyboardButton(BACK_BUTTON))
     return keyboard
 
-def get_settings_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    keyboard.add(
-        KeyboardButton("Редактировать категории расходов"),
-        KeyboardButton("Редактировать категории доходов"),
-        KeyboardButton("Очистка чата"),  # Если есть настройка clean_chat
-        KeyboardButton("Назад")
-    )
+
+def get_notifications_keyboard(user) -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row(KeyboardButton(f"🔔 Напоминания: {'Вкл' if user.daily_reminder_enabled else 'Выкл'}"))
+    keyboard.row(KeyboardButton(f"⏰ Время напоминания: {user.reminder_time}"))
+    keyboard.row(KeyboardButton(BACK_BUTTON))
+    return keyboard
+
+
+def get_category_management_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row(KeyboardButton(CATEGORY_ADD_BUTTON), KeyboardButton(CATEGORY_DELETE_BUTTON))
+    keyboard.row(KeyboardButton(BACK_BUTTON))
+    return keyboard
+
+
+def get_cancel_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton(CANCEL_BUTTON))
     return keyboard
