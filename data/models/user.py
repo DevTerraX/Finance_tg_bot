@@ -18,6 +18,7 @@ class User(Model):
     date_format = CharField(max_length=32, default='DD.MM.YYYY')
     daily_reminder_enabled = BooleanField(default=False)
     reminder_time = CharField(max_length=5, default='20:00')
+    cleanup_mode = CharField(max_length=10, default='standard')
     created_at = DatetimeField(auto_now_add=True)
     last_reminder_sent = DatetimeField(null=True)
 

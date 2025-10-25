@@ -9,10 +9,11 @@ from ..utils.db_utils import (
     get_or_create_user,
     get_categories,
     create_category,
-    create_transaction
+    create_transaction,
+    get_user_category,
 )
 from ..utils.validation import validate_amount
-from ..utils.cleanup import clean_chat
+from ..utils.cleanup import schedule_cleanup, schedule_user_message_cleanup
 from ..utils.storage import get_user_file_path, ensure_user_dirs
 from ..keyboards.category import get_categories_keyboard
 from ..keyboards.confirmation import get_confirmation_keyboard, get_edit_keyboard
@@ -23,36 +24,35 @@ from ..keyboards.main_menu import (
     EXPENSE_BUTTON
 )
 from ..states.expense_states import ExpenseStates
-from ..models.category import Category
-
-
 async def start_expense(message: types.Message, state: FSMContext):
     await state.finish()
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
     await ExpenseStates.sum.set()
     await state.update_data(user_id=user.id)
-    await message.answer("🧾 Введи сумму расхода (например, 123.45):", reply_markup=get_back_keyboard())
+    prompt = await message.answer("🧾 Введи сумму расхода (например, 123.45):", reply_markup=get_back_keyboard())
+    await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
 async def expense_sum(message: types.Message, state: FSMContext):
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    await schedule_user_message_cleanup(user, message)
     if message.text == BACK_BUTTON:
         await state.finish()
-        reply = await message.answer("🔙 Хорошо, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
-        if user.clean_chat:
-            await clean_chat(message.bot, message.chat.id, reply.message_id)
+        await message.answer("🔙 Хорошо, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
         return
     try:
         amount = validate_amount(message.text)
     except ValueError as exc:
-        await message.answer(f"⚠️ {exc} Попробуй ещё раз.", reply_markup=get_back_keyboard())
+        error_message = await message.answer(f"⚠️ {exc} Попробуй ещё раз.", reply_markup=get_back_keyboard())
+        await schedule_cleanup(user, error_message, category="prompt", delete_history=True)
         return
 
     await state.update_data(amount=amount)
     await ExpenseStates.category.set()
     categories = await get_categories(user, 'expense')
     keyboard = get_categories_keyboard(categories)
-    await message.answer("🏷️ Выбери категорию для этого расхода:", reply_markup=keyboard)
+    prompt = await message.answer("🏷️ Выбери категорию для этого расхода:", reply_markup=keyboard)
+    await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
 async def expense_category_callback(query: types.CallbackQuery, state: FSMContext):
@@ -60,7 +60,10 @@ async def expense_category_callback(query: types.CallbackQuery, state: FSMContex
     data = query.data
     if data.startswith('select_category_'):
         cat_id = int(data.split('_')[-1])
-        category = await Category.get(id=cat_id)
+        category = await get_user_category(user, cat_id)
+        if not category:
+            await query.answer("Категория недоступна.", show_alert=True)
+            return
         await state.update_data(category_id=cat_id, category_name=category.name)
         await ExpenseStates.confirm.set()
         state_data = await state.get_data()
@@ -74,22 +77,20 @@ async def expense_category_callback(query: types.CallbackQuery, state: FSMContex
     elif data == 'create_category':
         await ExpenseStates.category.set()
         await query.message.delete()
-        await query.message.answer("🆕 Как назовём новую категорию?", reply_markup=get_back_keyboard())
+        prompt = await query.message.answer("🆕 Как назовём новую категорию?", reply_markup=get_back_keyboard())
+        await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'back':
         await state.finish()
         await query.message.delete()
-        reply = await query.message.answer("🏠 Возвращаю в главное меню.", reply_markup=get_main_menu())
-        if user.clean_chat:
-            await clean_chat(query.bot, query.message.chat.id, reply.message_id)
+        await query.message.answer("🏠 Возвращаю в главное меню.", reply_markup=get_main_menu())
 
 
 async def expense_create_category(message: types.Message, state: FSMContext):
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    await schedule_user_message_cleanup(user, message)
     if message.text == BACK_BUTTON:
         await state.finish()
-        reply = await message.answer("🔙 Готово, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
-        if user.clean_chat:
-            await clean_chat(message.bot, message.chat.id, reply.message_id)
+        await message.answer("🔙 Готово, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
         return
 
     name = message.text.strip()
@@ -97,11 +98,12 @@ async def expense_create_category(message: types.Message, state: FSMContext):
     await state.update_data(category_id=category.id, category_name=category.name)
     await ExpenseStates.confirm.set()
     state_data = await state.get_data()
-    await message.answer(
+    confirm_prompt = await message.answer(
         f"🌟 Категория '{name}' создана!\n"
         f"Подтверди расход на {state_data['amount']:.2f} {user.currency}.",
         reply_markup=get_confirmation_keyboard()
     )
+    await schedule_cleanup(user, confirm_prompt, category="prompt", delete_history=True)
 
 
 async def expense_confirm_callback(query: types.CallbackQuery, state: FSMContext):
@@ -110,16 +112,22 @@ async def expense_confirm_callback(query: types.CallbackQuery, state: FSMContext
     state_data = await state.get_data()
 
     if data == 'confirm':
-        tx = await create_transaction(
-            user,
-            state_data['amount'],
-            state_data['category_id'],
-            'expense',
-            state_data.get('check'),
-            state_data.get('check_photo_path')
-        )
+        try:
+            tx = await create_transaction(
+                user,
+                state_data['amount'],
+                state_data['category_id'],
+                'expense',
+                state_data.get('check'),
+                state_data.get('check_photo_path')
+            )
+        except ValueError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
         await state.finish()
-        await query.message.edit_text("✅ Расход записан!")
+        if query.message.text != "✅ Расход записан!":
+            await query.message.edit_text("✅ Расход записан!")
+        await schedule_cleanup(user, query.message, category="result", delete_history=False)
         summary_text = (
             f"💸 Потрачено: {tx.amount:.2f} {user.currency} в категории {tx.category_name}.\n"
             f"💼 Баланс теперь: {user.balance:.2f} {user.currency}"
@@ -129,20 +137,20 @@ async def expense_confirm_callback(query: types.CallbackQuery, state: FSMContext
         elif state_data.get('check'):
             summary_text += "\n📝 Заметка к операции сохранена."
 
-        reply = await query.message.answer(summary_text, reply_markup=get_main_menu())
-
-        if user.clean_chat:
-            await clean_chat(query.bot, query.message.chat.id, reply.message_id)
+        result_message = await query.message.answer(summary_text)
+        await schedule_cleanup(user, result_message, category="result", delete_history=True)
+        await query.message.answer("🔁 Главное меню", reply_markup=get_main_menu())
     elif data == 'edit':
         await ExpenseStates.edit.set()
         await query.message.edit_text("✏️ Что хочешь подправить?", reply_markup=get_edit_keyboard())
     elif data == 'add_check':
         await ExpenseStates.check.set()
         await query.message.delete()
-        await query.message.answer(
+        prompt = await query.message.answer(
             "📸 Пришли чек: можно фото или текст.",
             reply_markup=get_back_keyboard()
         )
+        await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'back':
         await ExpenseStates.category.set()
         categories = await get_categories(user, 'expense')
@@ -154,7 +162,9 @@ async def expense_edit_callback(query: types.CallbackQuery, state: FSMContext):
     if data == 'edit_sum':
         await ExpenseStates.sum.set()
         await query.message.delete()
-        await query.message.answer("✨ Введи новую сумму расхода:", reply_markup=get_back_keyboard())
+        prompt = await query.message.answer("✨ Введи новую сумму расхода:", reply_markup=get_back_keyboard())
+        user = await get_or_create_user(query.from_user.id, query.from_user.full_name)
+        await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'edit_category':
         await ExpenseStates.category.set()
         user = await get_or_create_user(query.from_user.id, query.from_user.full_name)
@@ -173,19 +183,21 @@ async def expense_edit_callback(query: types.CallbackQuery, state: FSMContext):
 
 
 async def expense_check(message: types.Message, state: FSMContext):
+    user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    await schedule_user_message_cleanup(user, message)
     if message.text == BACK_BUTTON:
         await ExpenseStates.confirm.set()
         state_data = await state.get_data()
         category_name = state_data.get('category_name', '—')
-        await message.answer(
+        prompt = await message.answer(
             f"✍️ Подтвердим расход?\n"
             f"💸 Сумма: {state_data['amount']:.2f}\n"
             f"🏷️ Категория: {category_name}",
             reply_markup=get_confirmation_keyboard()
         )
+        await schedule_cleanup(user, prompt)
         return
 
-    user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
     ensure_user_dirs(user.id)
 
     if message.photo:
@@ -197,11 +209,13 @@ async def expense_check(message: types.Message, state: FSMContext):
             check_photo_path=str(destination),
             check=message.caption.strip() if message.caption else None
         )
-        await message.answer("📎 Фото чека закреплено. Подтверди операцию.", reply_markup=get_confirmation_keyboard())
+        prompt = await message.answer("📎 Фото чека закреплено. Подтверди операцию.", reply_markup=get_confirmation_keyboard())
+        await schedule_cleanup(user, prompt)
     else:
         note = message.text.strip()
         await state.update_data(check=note, check_photo_path=None)
-        await message.answer("📝 Заметка сохранена. Подтверди операцию.", reply_markup=get_confirmation_keyboard())
+        prompt = await message.answer("📝 Заметка сохранена. Подтверди операцию.", reply_markup=get_confirmation_keyboard())
+        await schedule_cleanup(user, prompt)
     await ExpenseStates.confirm.set()
 
 

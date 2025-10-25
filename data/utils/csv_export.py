@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -24,19 +25,32 @@ async def export_transactions_to_csv(user: User, period: timedelta) -> Optional[
 
     date_format = _to_strftime(user.date_format)
 
-    data = [{
-        'Дата': tx.date.strftime(date_format),
-        'Сумма': f"{tx.amount:.2f}",
-        'Категория': tx.category_name or 'Без категории',
-        'Тип операции': 'Доход' if tx.type == 'income' else 'Расход',
-        'Комментарий': tx.check or '',
-        'Фото чека': tx.check_photo_path or ''
-    } for tx in transactions]
+    rows = []
+    for index, tx in enumerate(transactions, start=1):
+        operation_type = '⬆️ Доход' if tx.type == 'income' else '⬇️ Расход'
+        amount_formatted = f"{tx.amount:,.2f}".replace(',', ' ').replace('.', ',')
+        amount_display = f"{amount_formatted} {user.currency}"
 
-    df = pd.DataFrame(data)
+        comment = tx.check or ''
+        if tx.check_photo_path:
+            check_note = Path(tx.check_photo_path).name
+        else:
+            check_note = ''
+
+        rows.append({
+            '№': index,
+            'Дата и время': f"{tx.date.strftime(date_format)} {tx.date.strftime('%H:%M')}",
+            'Тип': operation_type,
+            'Категория': tx.category_name or 'Без категории',
+            'Сумма': amount_display,
+            'Комментарий': comment,
+            'Чек': check_note,
+        })
+
+    df = pd.DataFrame(rows, columns=['№', 'Дата и время', 'Тип', 'Категория', 'Сумма', 'Комментарий', 'Чек'])
     filename = f"operations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     path = get_user_file_path(user.id, "csv", filename)
-    df.to_csv(path, index=False, encoding='utf-8')
+    df.to_csv(path, index=False, encoding='utf-8-sig', sep=';')
     return str(path)
 
 

@@ -8,7 +8,7 @@ def validate_amount(text: str) -> float:
     except ValueError as exc:
         raise ValueError("Сумма должна быть числом!") from exc
 
-    if amount < 0:
-        raise ValueError("Сумма должна быть неотрицательной!")
+    if amount <= 0:
+        raise ValueError("Сумма должна быть больше нуля!")
 
     return round(amount, 2)

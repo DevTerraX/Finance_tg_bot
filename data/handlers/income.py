@@ -7,10 +7,11 @@ from ..utils.db_utils import (
     get_or_create_user,
     get_categories,
     create_category,
-    create_transaction
+    create_transaction,
+    get_user_category,
 )
 from ..utils.validation import validate_amount
-from ..utils.cleanup import clean_chat
+from ..utils.cleanup import schedule_cleanup, schedule_user_message_cleanup
 from ..keyboards.category import get_categories_keyboard
 from ..keyboards.confirmation import get_confirmation_keyboard, get_edit_keyboard
 from ..keyboards.main_menu import (
@@ -20,36 +21,35 @@ from ..keyboards.main_menu import (
     INCOME_BUTTON
 )
 from ..states.income_states import IncomeStates
-from ..models.category import Category
-
-
 async def start_income(message: types.Message, state: FSMContext):
     await state.finish()
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
     await IncomeStates.sum.set()
     await state.update_data(user_id=user.id)
-    await message.answer("💰 Введи сумму дохода (например, 987.65):", reply_markup=get_back_keyboard())
+    prompt = await message.answer("💰 Введи сумму дохода (например, 987.65):", reply_markup=get_back_keyboard())
+    await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
 async def income_sum(message: types.Message, state: FSMContext):
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    await schedule_user_message_cleanup(user, message)
     if message.text == BACK_BUTTON:
         await state.finish()
-        reply = await message.answer("🔙 Хорошо, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
-        if user.clean_chat:
-            await clean_chat(message.bot, message.chat.id, reply.message_id)
+        await message.answer("🔙 Хорошо, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
         return
     try:
         amount = validate_amount(message.text)
     except ValueError as exc:
-        await message.answer(f"⚠️ {exc} Попробуй ещё раз.", reply_markup=get_back_keyboard())
+        error_message = await message.answer(f"⚠️ {exc} Попробуй ещё раз.", reply_markup=get_back_keyboard())
+        await schedule_cleanup(user, error_message, category="prompt", delete_history=True)
         return
 
     await state.update_data(amount=amount)
     await IncomeStates.category.set()
     categories = await get_categories(user, 'income')
     keyboard = get_categories_keyboard(categories, type='income')
-    await message.answer("🏷️ Выбери категорию для дохода:", reply_markup=keyboard)
+    prompt = await message.answer("🏷️ Выбери категорию для дохода:", reply_markup=keyboard)
+    await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
 async def income_category_callback(query: types.CallbackQuery, state: FSMContext):
@@ -57,7 +57,10 @@ async def income_category_callback(query: types.CallbackQuery, state: FSMContext
     data = query.data
     if data.startswith('select_category_'):
         cat_id = int(data.split('_')[-1])
-        category = await Category.get(id=cat_id)
+        category = await get_user_category(user, cat_id)
+        if not category:
+            await query.answer("Категория недоступна.", show_alert=True)
+            return
         await state.update_data(category_id=cat_id, category_name=category.name)
         await IncomeStates.confirm.set()
         state_data = await state.get_data()
@@ -71,22 +74,20 @@ async def income_category_callback(query: types.CallbackQuery, state: FSMContext
     elif data == 'create_category':
         await IncomeStates.category.set()
         await query.message.delete()
-        await query.message.answer("🆕 Как назовём новую категорию доходов?", reply_markup=get_back_keyboard())
+        prompt = await query.message.answer("🆕 Как назовём новую категорию доходов?", reply_markup=get_back_keyboard())
+        await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'back':
         await state.finish()
         await query.message.delete()
-        reply = await query.message.answer("🏠 Возвращаю в главное меню.", reply_markup=get_main_menu())
-        if user.clean_chat:
-            await clean_chat(query.bot, query.message.chat.id, reply.message_id)
+        await query.message.answer("🏠 Возвращаю в главное меню.", reply_markup=get_main_menu())
 
 
 async def income_create_category(message: types.Message, state: FSMContext):
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    await schedule_user_message_cleanup(user, message)
     if message.text == BACK_BUTTON:
         await state.finish()
-        reply = await message.answer("🔙 Готово, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
-        if user.clean_chat:
-            await clean_chat(message.bot, message.chat.id, reply.message_id)
+        await message.answer("🔙 Готово, возвращаю тебя в главное меню.", reply_markup=get_main_menu())
         return
 
     name = message.text.strip()
@@ -94,11 +95,12 @@ async def income_create_category(message: types.Message, state: FSMContext):
     await state.update_data(category_id=category.id, category_name=category.name)
     await IncomeStates.confirm.set()
     state_data = await state.get_data()
-    await message.answer(
+    confirm_prompt = await message.answer(
         f"🌟 Категория '{name}' готова!\n"
         f"Подтверди доход на {state_data['amount']:.2f} {user.currency}.",
         reply_markup=get_confirmation_keyboard(is_expense=False)
     )
+    await schedule_cleanup(user, confirm_prompt, category="prompt", delete_history=True)
 
 
 async def income_confirm_callback(query: types.CallbackQuery, state: FSMContext):
@@ -107,22 +109,27 @@ async def income_confirm_callback(query: types.CallbackQuery, state: FSMContext)
     state_data = await state.get_data()
 
     if data == 'confirm':
-        tx = await create_transaction(
-            user,
-            state_data['amount'],
-            state_data['category_id'],
-            'income'
-        )
+        try:
+            tx = await create_transaction(
+                user,
+                state_data['amount'],
+                state_data['category_id'],
+                'income'
+            )
+        except ValueError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
         await state.finish()
-        await query.message.edit_text("✅ Доход зафиксирован!")
+        if query.message.text != "✅ Доход зафиксирован!":
+            await query.message.edit_text("✅ Доход зафиксирован!")
+        await schedule_cleanup(user, query.message, category="result", delete_history=False)
         summary_text = (
             f"💰 Поступило: {tx.amount:.2f} {user.currency} в категории {tx.category_name}.\n"
             f"💼 Баланс теперь: {user.balance:.2f} {user.currency}"
         )
-        reply = await query.message.answer(summary_text, reply_markup=get_main_menu())
-
-        if user.clean_chat:
-            await clean_chat(query.bot, query.message.chat.id, reply.message_id)
+        result_message = await query.message.answer(summary_text)
+        await schedule_cleanup(user, result_message, category="result", delete_history=True)
+        await query.message.answer("🔁 Главное меню", reply_markup=get_main_menu())
     elif data == 'edit':
         await IncomeStates.edit.set()
         await query.message.edit_text("✏️ Что хочешь подправить?", reply_markup=get_edit_keyboard())
@@ -137,7 +144,9 @@ async def income_edit_callback(query: types.CallbackQuery, state: FSMContext):
     if data == 'edit_sum':
         await IncomeStates.sum.set()
         await query.message.delete()
-        await query.message.answer("✨ Введи новую сумму дохода:", reply_markup=get_back_keyboard())
+        prompt = await query.message.answer("✨ Введи новую сумму дохода:", reply_markup=get_back_keyboard())
+        user = await get_or_create_user(query.from_user.id, query.from_user.full_name)
+        await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'edit_category':
         await IncomeStates.category.set()
         user = await get_or_create_user(query.from_user.id, query.from_user.full_name)

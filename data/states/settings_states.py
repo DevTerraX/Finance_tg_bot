@@ -12,3 +12,7 @@ class SettingsStates(StatesGroup):
     edit_date_format = State()
     notifications_menu = State()
     edit_reminder_time = State()
+    support_collect_name = State()
+    support_collect_tag_permission = State()
+    support_collect_issue = State()
+    support_confirmation = State()

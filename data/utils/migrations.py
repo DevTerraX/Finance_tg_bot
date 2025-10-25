@@ -27,6 +27,7 @@ async def _ensure_user_columns(connection) -> None:
     await add_column("date_format", "ALTER TABLE users ADD COLUMN date_format VARCHAR(32) NOT NULL DEFAULT 'DD.MM.YYYY'")
     await add_column("daily_reminder_enabled", "ALTER TABLE users ADD COLUMN daily_reminder_enabled INT NOT NULL DEFAULT 0")
     await add_column("reminder_time", "ALTER TABLE users ADD COLUMN reminder_time VARCHAR(5) NOT NULL DEFAULT '20:00'")
+    await add_column("cleanup_mode", "ALTER TABLE users ADD COLUMN cleanup_mode VARCHAR(10) NOT NULL DEFAULT 'standard'")
     await add_column(
         "created_at",
         "ALTER TABLE users ADD COLUMN created_at TIMESTAMP",

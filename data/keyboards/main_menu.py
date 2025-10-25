@@ -4,6 +4,7 @@ BALANCE_BUTTON = "💰 Баланс"
 EXPENSE_BUTTON = "🧾 Добавить расход"
 INCOME_BUTTON = "💵 Добавить доход"
 SUMMARY_BUTTON = "📊 Итоги"
+HISTORY_BUTTON = "📝 Операции"
 SETTINGS_BUTTON = "⚙️ Настройки"
 BACK_BUTTON = "🔙 Назад"
 
@@ -12,7 +13,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.row(KeyboardButton(BALANCE_BUTTON), KeyboardButton(EXPENSE_BUTTON))
     keyboard.row(KeyboardButton(INCOME_BUTTON), KeyboardButton(SUMMARY_BUTTON))
-    keyboard.row(KeyboardButton(SETTINGS_BUTTON))
+    keyboard.row(KeyboardButton(HISTORY_BUTTON), KeyboardButton(SETTINGS_BUTTON))
     return keyboard
 
 
