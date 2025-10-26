@@ -16,3 +16,4 @@ async def back_to_main_menu(message: types.Message, state: FSMContext):
 
 def register_handlers(dp: Dispatcher):
     dp.register_message_handler(back_to_main_menu, lambda m: m.text == BACK_BUTTON, state=None)
+    dp.register_message_handler(back_to_main_menu, commands=['menu'], state='*')

@@ -4,6 +4,8 @@ from datetime import datetime
 
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
+from aiogram.utils.exceptions import MessageToDeleteNotFound
+from contextlib import suppress
 
 from ..utils.db_utils import (
     get_or_create_user,
@@ -15,6 +17,7 @@ from ..utils.db_utils import (
 from ..utils.validation import validate_amount
 from ..utils.cleanup import schedule_cleanup, schedule_user_message_cleanup
 from ..utils.storage import get_user_file_path, ensure_user_dirs
+from ..utils.session_cleanup import session_cleanup, track_session_message
 from ..keyboards.category import get_categories_keyboard
 from ..keyboards.confirmation import get_confirmation_keyboard, get_edit_keyboard
 from ..keyboards.main_menu import (
@@ -27,9 +30,11 @@ from ..states.expense_states import ExpenseStates
 async def start_expense(message: types.Message, state: FSMContext):
     await state.finish()
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    session_cleanup.start(user.id, "expense")
     await ExpenseStates.sum.set()
     await state.update_data(user_id=user.id)
     prompt = await message.answer("🧾 Введи сумму расхода (например, 123.45):", reply_markup=get_back_keyboard())
+    track_session_message(user.id, "expense", prompt)
     await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
@@ -52,6 +57,7 @@ async def expense_sum(message: types.Message, state: FSMContext):
     categories = await get_categories(user, 'expense')
     keyboard = get_categories_keyboard(categories)
     prompt = await message.answer("🏷️ Выбери категорию для этого расхода:", reply_markup=keyboard)
+    track_session_message(user.id, "expense", prompt)
     await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
@@ -76,12 +82,15 @@ async def expense_category_callback(query: types.CallbackQuery, state: FSMContex
         )
     elif data == 'create_category':
         await ExpenseStates.category.set()
-        await query.message.delete()
+        with suppress(MessageToDeleteNotFound):
+            await query.message.delete()
         prompt = await query.message.answer("🆕 Как назовём новую категорию?", reply_markup=get_back_keyboard())
+        track_session_message(user.id, "expense", prompt)
         await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'back':
         await state.finish()
-        await query.message.delete()
+        with suppress(MessageToDeleteNotFound):
+            await query.message.delete()
         await query.message.answer("🏠 Возвращаю в главное меню.", reply_markup=get_main_menu())
 
 
@@ -103,6 +112,7 @@ async def expense_create_category(message: types.Message, state: FSMContext):
         f"Подтверди расход на {state_data['amount']:.2f} {user.currency}.",
         reply_markup=get_confirmation_keyboard()
     )
+    track_session_message(user.id, "expense", confirm_prompt)
     await schedule_cleanup(user, confirm_prompt, category="prompt", delete_history=True)
 
 
@@ -125,6 +135,7 @@ async def expense_confirm_callback(query: types.CallbackQuery, state: FSMContext
             await query.answer(str(exc), show_alert=True)
             return
         await state.finish()
+        await session_cleanup.finish(user, "expense", keep_last=query.message)
         if query.message.text != "✅ Расход записан!":
             await query.message.edit_text("✅ Расход записан!")
         await schedule_cleanup(user, query.message, category="result", delete_history=False)
@@ -145,11 +156,13 @@ async def expense_confirm_callback(query: types.CallbackQuery, state: FSMContext
         await query.message.edit_text("✏️ Что хочешь подправить?", reply_markup=get_edit_keyboard())
     elif data == 'add_check':
         await ExpenseStates.check.set()
-        await query.message.delete()
+        with suppress(MessageToDeleteNotFound):
+            await query.message.delete()
         prompt = await query.message.answer(
             "📸 Пришли чек: можно фото или текст.",
             reply_markup=get_back_keyboard()
         )
+        track_session_message(user.id, "expense", prompt)
         await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'back':
         await ExpenseStates.category.set()
@@ -164,6 +177,7 @@ async def expense_edit_callback(query: types.CallbackQuery, state: FSMContext):
         await query.message.delete()
         prompt = await query.message.answer("✨ Введи новую сумму расхода:", reply_markup=get_back_keyboard())
         user = await get_or_create_user(query.from_user.id, query.from_user.full_name)
+        track_session_message(user.id, "expense", prompt)
         await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'edit_category':
         await ExpenseStates.category.set()
@@ -195,6 +209,7 @@ async def expense_check(message: types.Message, state: FSMContext):
             f"🏷️ Категория: {category_name}",
             reply_markup=get_confirmation_keyboard()
         )
+        track_session_message(user.id, "expense", prompt)
         await schedule_cleanup(user, prompt)
         return
 
@@ -210,11 +225,13 @@ async def expense_check(message: types.Message, state: FSMContext):
             check=message.caption.strip() if message.caption else None
         )
         prompt = await message.answer("📎 Фото чека закреплено. Подтверди операцию.", reply_markup=get_confirmation_keyboard())
+        track_session_message(user.id, "expense", prompt)
         await schedule_cleanup(user, prompt)
     else:
         note = message.text.strip()
         await state.update_data(check=note, check_photo_path=None)
         prompt = await message.answer("📝 Заметка сохранена. Подтверди операцию.", reply_markup=get_confirmation_keyboard())
+        track_session_message(user.id, "expense", prompt)
         await schedule_cleanup(user, prompt)
     await ExpenseStates.confirm.set()
 

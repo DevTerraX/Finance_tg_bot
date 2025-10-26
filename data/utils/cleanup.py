@@ -50,7 +50,7 @@ async def schedule_cleanup(
     if cleanup_delay <= 0:
         return
 
-    effective_delete_history = delete_history or (mode == "aggressive" and category_key in {"prompt", "user", "result"})
+    effective_delete_history = delete_history and mode == "aggressive" and category_key in {"prompt", "user", "result"}
 
     asyncio.create_task(
         _cleanup_after_delay(

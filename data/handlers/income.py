@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
+from aiogram.utils.exceptions import MessageToDeleteNotFound
+from contextlib import suppress
 
 from ..utils.db_utils import (
     get_or_create_user,
@@ -12,6 +14,7 @@ from ..utils.db_utils import (
 )
 from ..utils.validation import validate_amount
 from ..utils.cleanup import schedule_cleanup, schedule_user_message_cleanup
+from ..utils.session_cleanup import session_cleanup, track_session_message
 from ..keyboards.category import get_categories_keyboard
 from ..keyboards.confirmation import get_confirmation_keyboard, get_edit_keyboard
 from ..keyboards.main_menu import (
@@ -24,9 +27,11 @@ from ..states.income_states import IncomeStates
 async def start_income(message: types.Message, state: FSMContext):
     await state.finish()
     user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    session_cleanup.start(user.id, "income")
     await IncomeStates.sum.set()
     await state.update_data(user_id=user.id)
     prompt = await message.answer("💰 Введи сумму дохода (например, 987.65):", reply_markup=get_back_keyboard())
+    track_session_message(user.id, "income", prompt)
     await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
@@ -49,6 +54,7 @@ async def income_sum(message: types.Message, state: FSMContext):
     categories = await get_categories(user, 'income')
     keyboard = get_categories_keyboard(categories, type='income')
     prompt = await message.answer("🏷️ Выбери категорию для дохода:", reply_markup=keyboard)
+    track_session_message(user.id, "income", prompt)
     await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
 
 
@@ -73,12 +79,15 @@ async def income_category_callback(query: types.CallbackQuery, state: FSMContext
         )
     elif data == 'create_category':
         await IncomeStates.category.set()
-        await query.message.delete()
+        with suppress(MessageToDeleteNotFound):
+            await query.message.delete()
         prompt = await query.message.answer("🆕 Как назовём новую категорию доходов?", reply_markup=get_back_keyboard())
+        track_session_message(user.id, "income", prompt)
         await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'back':
         await state.finish()
-        await query.message.delete()
+        with suppress(MessageToDeleteNotFound):
+            await query.message.delete()
         await query.message.answer("🏠 Возвращаю в главное меню.", reply_markup=get_main_menu())
 
 
@@ -100,6 +109,7 @@ async def income_create_category(message: types.Message, state: FSMContext):
         f"Подтверди доход на {state_data['amount']:.2f} {user.currency}.",
         reply_markup=get_confirmation_keyboard(is_expense=False)
     )
+    track_session_message(user.id, "income", confirm_prompt)
     await schedule_cleanup(user, confirm_prompt, category="prompt", delete_history=True)
 
 
@@ -120,6 +130,7 @@ async def income_confirm_callback(query: types.CallbackQuery, state: FSMContext)
             await query.answer(str(exc), show_alert=True)
             return
         await state.finish()
+        await session_cleanup.finish(user, "income", keep_last=query.message)
         if query.message.text != "✅ Доход зафиксирован!":
             await query.message.edit_text("✅ Доход зафиксирован!")
         await schedule_cleanup(user, query.message, category="result", delete_history=False)
@@ -143,9 +154,11 @@ async def income_edit_callback(query: types.CallbackQuery, state: FSMContext):
     data = query.data
     if data == 'edit_sum':
         await IncomeStates.sum.set()
-        await query.message.delete()
+        with suppress(MessageToDeleteNotFound):
+            await query.message.delete()
         prompt = await query.message.answer("✨ Введи новую сумму дохода:", reply_markup=get_back_keyboard())
         user = await get_or_create_user(query.from_user.id, query.from_user.full_name)
+        track_session_message(user.id, "income", prompt)
         await schedule_cleanup(user, prompt, category="prompt", delete_history=True)
     elif data == 'edit_category':
         await IncomeStates.category.set()

@@ -6,6 +6,16 @@ def _format_datetime(dt: datetime) -> str:
     return dt.strftime("%d.%m %H:%M")
 
 
+def get_history_type_keyboard() -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("➖ Расходы", callback_data="history_type_expense"),
+        InlineKeyboardButton("➕ Доходы", callback_data="history_type_income"),
+    )
+    keyboard.add(InlineKeyboardButton("✖️ Закрыть", callback_data="history_close"))
+    return keyboard
+
+
 def get_transactions_keyboard(transactions):
     keyboard = InlineKeyboardMarkup(row_width=1)
     for tx in transactions:
@@ -13,8 +23,21 @@ def get_transactions_keyboard(transactions):
         category = tx.category_name or "Без категории"
         button_text = f"{direction} {tx.amount:.2f} • {category} • {_format_datetime(tx.date)}"
         keyboard.add(InlineKeyboardButton(button_text, callback_data=f"history_tx_{tx.id}"))
+    keyboard.add(InlineKeyboardButton("📅 Выбрать период", callback_data="history_period"))
+    keyboard.add(InlineKeyboardButton("↔️ Сменить тип", callback_data="history_change_type"))
     keyboard.add(InlineKeyboardButton("🔄 Обновить список", callback_data="history_refresh"))
     keyboard.add(InlineKeyboardButton("✖️ Закрыть", callback_data="history_close"))
+    return keyboard
+
+
+def get_history_period_mode_keyboard() -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("🕒 Последние 24 часа", callback_data="history_period_24h"),
+        InlineKeyboardButton("📅 Конкретный день", callback_data="history_period_day"),
+        InlineKeyboardButton("📆 Диапазон дат", callback_data="history_period_range"),
+        InlineKeyboardButton("🔙 К списку", callback_data="history_period_back"),
+    )
     return keyboard
 
 
